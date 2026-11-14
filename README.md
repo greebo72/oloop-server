@@ -48,6 +48,21 @@ instead of `build: .`.
 To update: run the script again, build the image under the new name, change the name in the stack and
 redeploy. The database is brought up to date when the server starts; the data folders stay.
 
+`scripts/portainer_build.py` does the same through the API of Portainer, so no upload by hand is needed:
+
+```
+export PORTAINER_URL=https://portainer.example.org
+export PORTAINER_TOKEN=...            # My account, Access tokens in Portainer
+scripts/portainer_build.py --env-id 3
+```
+
+It packs the context, has the environment build it, prints the build, and checks that the image exists
+afterwards. The token is only read from the environment, never from an argument, and never printed. The
+address has to be https (http only for localhost); `PORTAINER_CACERT` names a certificate authority for
+a certificate that Portainer signed itself. Without `--env-id` the only environment is taken, with
+several they are listed and nothing is built. Mind that the token has the rights of the user that made
+it: a user of its own with access to one environment is the safer choice.
+
 The first account is made in the running container (Portainer: *Containers*, the server, *Console*):
 
 ```
