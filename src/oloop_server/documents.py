@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from oloop_server import access
 from oloop_server.auth import SessionDep, current_device
@@ -15,6 +16,7 @@ from oloop_server.db import utcnow
 from oloop_server.encoding import b64url_decode, b64url_encode
 from oloop_server.errors import ApiError
 from oloop_server.models import (
+    Blob,
     Counter,
     Device,
     Document,
@@ -115,6 +117,30 @@ def _next_seq(session: Session) -> int:
         update(Counter).where(Counter.name == "changes")
         .values(value=Counter.value + 1).returning(Counter.value)
     ).scalar_one()
+
+
+def _reference_blob(session: Session, task_id: uuid.UUID, project_id: uuid.UUID,
+                    new: uuid.UUID | None, old: uuid.UUID | None, now: datetime) -> None:
+    """Keeps the books of which blob a task refers to, for the clean-up.
+
+    A task may only refer to a blob that was uploaded for it. The blob it
+    leaves is unreferenced from now on, and the one it takes up is not.
+    """
+    if new == old:
+        return
+
+    if new is not None:
+        blob = session.get(Blob, new)
+        if blob is None or blob.task_id != task_id or blob.project_id != project_id:
+            raise _bad("blobRef is not a blob that was uploaded for this task")
+        blob.unreferenced_since = None
+        if blob.first_referenced_at is None:
+            blob.first_referenced_at = now
+
+    if old is not None:
+        dropped = session.get(Blob, old)
+        if dropped is not None:
+            dropped.unreferenced_since = now
 
 
 def _newest_key_version(session: Session, project_id: uuid.UUID) -> int:
@@ -250,6 +276,8 @@ def _create(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocume
                          created_at=now, updated_at=now))
     session.flush()
     session.add(_revision(doc_id, body, data, device, now))
+    if body.kind == "task":
+        _reference_blob(session, doc_id, project_id, body.blobRef, None, now)
 
     try:
         session.commit()
@@ -332,6 +360,15 @@ def _update(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocume
         session.rollback()
         raise ApiError(409, "conflict", "the document changed, load it again")
 
+    if doc.kind == "task":
+        before = session.get(Revision, (doc.id, base_rev))
+        _reference_blob(session, doc.id, doc.project_id, body.blobRef,
+                        before.blob_ref if before else None, now)
     session.add(_revision(doc.id, body, data, device, now))
-    session.commit()
+    try:
+        session.commit()
+    except StaleDataError:
+        # A blob the write refers to was removed by the clean-up meanwhile.
+        session.rollback()
+        raise ApiError(409, "conflict", "a blob of the task is gone, load it again") from None
     return {"rev": body.rev, "cursor": str(seq)}

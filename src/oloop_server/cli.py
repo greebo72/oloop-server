@@ -6,9 +6,10 @@ import sys
 
 import uvicorn
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from oloop_server.auth import username_key
+from oloop_server.blobstore import collect_garbage
 from oloop_server.config import get_settings
 from oloop_server.db import make_engine
 from oloop_server.migrate import upgrade
@@ -65,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--no-migrate", action="store_true", help="do not update the database first")
 
     commands.add_parser("migrate", help="update the database to the current version")
+    commands.add_parser("gc-blobs", help="remove the blobs nobody needs, once")
 
     user = commands.add_parser("create-user", help="create an account")
     user.add_argument("username")
@@ -75,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "migrate":
         upgrade(get_settings().database_url)
+        return 0
+
+    if args.command == "gc-blobs":
+        settings = get_settings()
+        upgrade(settings.database_url)
+        result = collect_garbage(
+            sessionmaker(make_engine(settings.database_url)), settings.blob_dir)
+        print(f"removed {result.never_referenced} blobs never used, {result.dropped} dropped "
+              f"ones and {result.stray_files} stray files")
         return 0
 
     if args.command == "create-user":

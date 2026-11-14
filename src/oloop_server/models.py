@@ -1,5 +1,5 @@
 """The tables. What is stored is described in spec/SERVER.md; the login, the key
-bundle, projects and documents are here so far."""
+bundle, projects, documents and blobs are here."""
 import uuid
 from datetime import datetime
 
@@ -195,3 +195,24 @@ class Revision(Base):
     written_by: Mapped[uuid.UUID] = mapped_column(Uuid)
     written_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     data: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class Blob(Base):
+    """An encrypted image. The bytes are a file (see blobstore.py), this row is
+    what is known about it. Created after the file is complete."""
+
+    __tablename__ = "blobs"
+    __table_args__ = (Index("ix_blobs_unreferenced_since", "unreferenced_since"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
+    # The task it was uploaded for. Only that task may refer to it.
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(Uuid)
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    # Null until a task refers to it.
+    first_referenced_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    # Since when no current revision refers to it. Null while one does.
+    unreferenced_since: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)

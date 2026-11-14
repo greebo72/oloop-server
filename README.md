@@ -6,8 +6,9 @@ in the clients. The folder backend of oloop does not need it.
 
 **Status:** the login works (accounts, `POST /v1/auth/login`, `/refresh` and `/logout`, with a limit on
 failed logins), the key bundle (`GET` and `PUT /v1/keys`), projects and documents (`PUT` and `GET
-/v1/documents`, the feed of changes, `/v1/head`, the history of a document, `GET /v1/projects`). Image
-blobs, further members of a project (the agents) and the quota are not there yet.
+/v1/documents`, the feed of changes, `/v1/head`, the history of a document, `GET /v1/projects`) and the
+image blobs (`PUT`, `GET` and `HEAD /v1/blobs/{id}`). Further members of a project (the agents) and the
+quota are not there yet.
 
 The contract is in the [spec](https://github.com/greebo72/oloop-spec), included here as the submodule
 `spec/`: [`SERVER.md`](spec/SERVER.md) (encryption, API, blobs), [`AGENTS.md`](spec/AGENTS.md) (the CLI
@@ -49,6 +50,16 @@ echo "$PASSWORD" | oloop-server create-user alice --password-stdin
 `oloop-server serve` brings the database up to date before it starts (`--no-migrate` skips that);
 `oloop-server migrate` does only that.
 
+## Blobs
+
+The encrypted images are files below `OLOOP_BLOB_DIR`, in folders named after the first characters of
+the id. The database only knows which blob belongs to which task. The server removes what nobody needs:
+a blob no task ever referred to after 24 hours, a blob no task refers to any more after 30 days, and
+the temporary files of aborted uploads. It does that every `OLOOP_BLOB_GC_INTERVAL_MINUTES` (60; 0
+switches it off); `oloop-server gc-blobs` does it once. Back up the folder together with the database.
+
+A blob is uploaded for a task that exists, so an image is added after the task is written.
+
 ## Develop
 
 ```
@@ -64,7 +75,7 @@ oloop-server serve
 
 Environment variables, prefix `OLOOP_`, or a `.env` file: `DATABASE_URL`, `BLOB_DIR`, `TRUSTED_PROXIES`,
 `MAX_DOCUMENT_BYTES`, `MAX_BLOB_BYTES`, `ACCESS_TOKEN_MINUTES`, `REFRESH_TOKEN_DAYS`,
-`LOGIN_WINDOW_MINUTES`, `LOGIN_MAX_FAILURES_PER_USER`, `LOGIN_MAX_FAILURES_PER_ADDRESS`. See
+`BLOB_GC_INTERVAL_MINUTES`, `LOGIN_WINDOW_MINUTES`, `LOGIN_MAX_FAILURES_PER_USER`, `LOGIN_MAX_FAILURES_PER_ADDRESS`. See
 `src/oloop_server/config.py`.
 
 `TRUSTED_PROXIES` takes addresses or networks (`172.18.0.0/16`), comma separated. The `X-Forwarded-For`

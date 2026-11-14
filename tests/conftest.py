@@ -55,3 +55,15 @@ def login(client, username="alice", password=PASSWORD, device="laptop"):
 
 def bearer(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def alice(client, make_user):
+    make_user("alice")
+    return bearer(login(client, "alice").json()["accessToken"])
+
+
+@pytest.fixture
+def bob(client, make_user):
+    make_user("bob")
+    return bearer(login(client, "bob").json()["accessToken"])

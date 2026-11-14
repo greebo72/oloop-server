@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     max_document_bytes: int = 256 * 1024
     max_blob_bytes: int = 10 * 1024 * 1024
 
+    # How often unused blobs are removed (spec/SERVER.md, "Images"), in minutes.
+    # 0 switches it off; `oloop-server gc-blobs` does it once.
+    blob_gc_interval_minutes: float = 60
+
     # Tokens (spec/SERVER.md, "Authentication"). The spec fixes 15 minutes for
     # the access token; the life of a refresh token is renewed at every use.
     access_token_minutes: int = 15

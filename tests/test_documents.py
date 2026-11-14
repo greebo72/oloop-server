@@ -3,94 +3,25 @@ import uuid
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from conftest import bearer, login
+from helpers import (
+    add_member,
+    b64,
+    data,
+    make_project,
+    make_task,
+    new_id,
+    project_body,
+    task_body,
+    user_id,
+    wrapped,
+    write,
+)
 from oloop_server import documents
-from oloop_server.encoding import b64url_encode
-from oloop_server.models import Counter, ProjectKey, ProjectMember, User
+from oloop_server.models import Counter
 
 VECTORS = Path(__file__).parent.parent / "spec" / "fixtures" / "server" / "vectors.json"
-
-
-def b64(data: bytes) -> str:
-    return b64url_encode(data)
-
-
-def data(fill=1, size=80) -> str:
-    """Something with the shape of an envelope. The server cannot tell more."""
-    return b64(bytes([1, 1]) + bytes([fill]) * (size - 2))
-
-
-def wrapped(fill=9) -> str:
-    return b64(bytes([fill]) * 92)
-
-
-def new_id() -> str:
-    return str(uuid.uuid4())
-
-
-@pytest.fixture
-def alice(client, make_user):
-    make_user("alice")
-    return bearer(login(client, "alice").json()["accessToken"])
-
-
-@pytest.fixture
-def bob(client, make_user):
-    make_user("bob")
-    return bearer(login(client, "bob").json()["accessToken"])
-
-
-def write(client, headers, doc_id, body, *, base=None):
-    """base None creates (If-None-Match), a number changes (If-Match)."""
-    precondition = {"If-None-Match": "*"} if base is None else {"If-Match": f'"{base}"'}
-    return client.put(f"/v1/documents/{doc_id}", json=body, headers={**headers, **precondition})
-
-
-def project_body(**changes):
-    body = {"kind": "project", "keyVersion": 1, "rev": 1, "data": data(),
-            "key": {"keyVersion": 1, "wrapped": wrapped()}}
-    body.update(changes)
-    return body
-
-
-def task_body(project_id, rev=1, fill=1, **changes):
-    body = {"kind": "task", "projectId": project_id, "keyVersion": 1, "rev": rev,
-            "data": data(fill)}
-    body.update(changes)
-    return body
-
-
-def make_project(client, headers):
-    project_id = new_id()
-    assert write(client, headers, project_id, project_body()).status_code == 200
-    return project_id
-
-
-def make_task(client, headers, project_id):
-    task_id = new_id()
-    assert write(client, headers, task_id, task_body(project_id)).status_code == 200
-    return task_id
-
-
-def user_id(app, name):
-    with Session(app.state.engine) as session:
-        return session.scalar(select(User.id).where(User.username_key == name))
-
-
-def add_member(app, project_id, name, role):
-    """The API for more members comes with the agents; the rows are what the
-    rules of access are tested with."""
-    with Session(app.state.engine) as session:
-        uid = session.scalar(select(User.id).where(User.username_key == name))
-        session.add(ProjectMember(project_id=uuid.UUID(project_id), principal_id=uid,
-                                  kind="user", role=role))
-        session.flush()
-        session.add(ProjectKey(project_id=uuid.UUID(project_id), principal_id=uid,
-                               key_version=1, granted_by=uid, wrapped=b"\x00" * 92))
-        session.commit()
 
 
 # ---------------- Without a login ----------------
@@ -293,18 +224,6 @@ def test_the_project_of_a_task_and_the_kind_of_a_document_cannot_change(client, 
 
     assert write(client, alice, task_id, task_body(other, rev=2), base=1).status_code == 400
     assert write(client, alice, task_id, project_body(rev=2, key=None), base=1).status_code == 400
-
-
-def test_a_task_keeps_its_blob_reference_and_can_lose_it(client, alice):
-    project_id = make_project(client, alice)
-    blob = new_id()
-    task_id = new_id()
-    write(client, alice, task_id, task_body(project_id, blobRef=blob))
-
-    assert client.get(f"/v1/documents/{task_id}", headers=alice).json()["blobRef"] == blob
-
-    write(client, alice, task_id, task_body(project_id, rev=2, blobRef=None), base=1)
-    assert client.get(f"/v1/documents/{task_id}", headers=alice).json()["blobRef"] is None
 
 
 def test_a_project_changes_with_a_new_revision(client, alice):
