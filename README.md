@@ -37,6 +37,23 @@ What the server needs from it:
 
 `.env.example` lists the variables of a local compose setup.
 
+### Build the image without Docker on your computer
+
+`scripts/build-context.sh` packs what the Dockerfile needs into `dist/oloop-server-<revision>.tar.gz`.
+In Portainer, choose *Images*, *Build a new image*, upload that archive and give the image a name such
+as `oloop-server:<revision>`. Portainer builds it on the Docker host of the environment you picked, so
+the image has the architecture of that host. The stack then says `image: oloop-server:<revision>`
+instead of `build: .`.
+
+To update: run the script again, build the image under the new name, change the name in the stack and
+redeploy. The database is brought up to date when the server starts; the data folders stay.
+
+The first account is made in the running container (Portainer: *Containers*, the server, *Console*):
+
+```
+oloop-server create-user alice
+```
+
 ## Accounts
 
 There is no public registration. The operator creates accounts on the command line (the password has
