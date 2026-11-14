@@ -4,8 +4,9 @@ The server of the optional server backend of [oloop](https://github.com/greebo72
 **encrypted** projects, tasks and image blobs and never sees them in clear text: all encryption happens
 in the clients. The folder backend of oloop does not need it.
 
-**Status:** the login works: accounts, `POST /v1/auth/login`, `/refresh` and `/logout`, with a limit on
-failed logins. Projects, documents, blobs, key bundles and agents are not there yet.
+**Status:** the login works (accounts, `POST /v1/auth/login`, `/refresh` and `/logout`, with a limit on
+failed logins) and so does the key bundle (`GET` and `PUT /v1/keys`). Projects, documents, blobs and
+agents are not there yet.
 
 The contract is in the [spec](https://github.com/greebo72/oloop-spec), included here as the submodule
 `spec/`: [`SERVER.md`](spec/SERVER.md) (encryption, API, blobs), [`AGENTS.md`](spec/AGENTS.md) (the CLI

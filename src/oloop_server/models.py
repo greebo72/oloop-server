@@ -1,9 +1,18 @@
-"""The tables. What is stored is described in spec/SERVER.md; only what the
-login needs is here so far."""
+"""The tables. What is stored is described in spec/SERVER.md; the login and the
+key bundle are here so far."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oloop_server.db import Base, UtcDateTime, utcnow
@@ -69,3 +78,22 @@ class LoginFailure(Base):
     username_key: Mapped[str] = mapped_column(String(100))
     address: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+class KeyBundle(Base):
+    """The key bundle of a user (spec/SERVER.md, "Key bundle"): the key pair,
+    with the secret key encrypted twice. The server cannot open it."""
+
+    __tablename__ = "key_bundles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    # Starts at 1, rises with every change; the precondition of an update.
+    rev: Mapped[int] = mapped_column(Integer)
+    salt: Mapped[bytes] = mapped_column(LargeBinary)
+    m: Mapped[int] = mapped_column(BigInteger)
+    t: Mapped[int] = mapped_column(BigInteger)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary)
+    wrapped_secret_key: Mapped[bytes] = mapped_column(LargeBinary)
+    recovery_wrapped_secret_key: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
