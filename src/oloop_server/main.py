@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
-from oloop_server import __version__, auth, errors, keys
+from oloop_server import __version__, auth, documents, errors, keys, projects
 from oloop_server.config import Settings, get_settings
 from oloop_server.db import make_engine
 from oloop_server.netutil import parse_networks
@@ -27,6 +27,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     errors.install(app)
     app.include_router(auth.router)
     app.include_router(keys.router)
+    app.include_router(projects.router)
+    app.include_router(documents.router)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

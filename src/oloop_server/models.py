@@ -1,5 +1,5 @@
-"""The tables. What is stored is described in spec/SERVER.md; the login and the
-key bundle are here so far."""
+"""The tables. What is stored is described in spec/SERVER.md; the login, the key
+bundle, projects and documents are here so far."""
 import uuid
 from datetime import datetime
 
@@ -7,6 +7,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -97,3 +98,100 @@ class KeyBundle(Base):
     recovery_wrapped_secret_key: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+class Counter(Base):
+    """A counter. `changes` numbers every write of a document.
+
+    A write takes the next number with an UPDATE, which holds the row until the
+    write is committed. So numbers are committed in the order they were taken,
+    and a client that has read up to a number has not skipped a smaller one.
+    """
+
+    __tablename__ = "counters"
+
+    name: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[int] = mapped_column(BigInteger)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    # The id of the project document.
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+class ProjectMember(Base):
+    """Who may use a project, with which role. The principal is a user or an
+    agent; the id is not a foreign key because it points to either table."""
+
+    __tablename__ = "project_members"
+    __table_args__ = (
+        CheckConstraint("kind IN ('user', 'agent')", name="kind"),
+        CheckConstraint("role IN ('owner', 'write', 'read')", name="role"),
+        Index("ix_project_members_principal_id", "principal_id"),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), primary_key=True)
+    principal_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    role: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+class ProjectKey(Base):
+    """The key of a project, handed to one member (spec/SERVER.md, "Handing a
+    project key to a principal"). The server cannot open it."""
+
+    __tablename__ = "project_keys"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id", "principal_id"],
+            ["project_members.project_id", "project_members.principal_id"],
+        ),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    principal_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    key_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    granted_by: Mapped[uuid.UUID] = mapped_column(Uuid)
+    wrapped: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+class Document(Base):
+    """A project or a task. Its content is in the revisions; this row says
+    which revision is the current one and when it was written (`seq`)."""
+
+    __tablename__ = "documents"
+    __table_args__ = (
+        CheckConstraint("kind IN ('project', 'task')", name="kind"),
+        Index("ix_documents_project_id", "project_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    # For a project document, its own id.
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
+    rev: Mapped[int] = mapped_column(Integer)
+    seq: Mapped[int] = mapped_column(BigInteger, unique=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+class Revision(Base):
+    """One state of a document, as the client wrote it. They are all kept."""
+
+    __tablename__ = "document_revisions"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id"), primary_key=True)
+    rev: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key_version: Mapped[int] = mapped_column(Integer)
+    blob_ref: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    size: Mapped[int] = mapped_column(Integer)
+    # The principal that wrote it. Set by the server, never by the client.
+    written_by: Mapped[uuid.UUID] = mapped_column(Uuid)
+    written_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    data: Mapped[bytes] = mapped_column(LargeBinary)

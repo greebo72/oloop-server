@@ -1,5 +1,4 @@
 """The key bundle of the signed-in user (spec/SERVER.md, "Key bundle")."""
-import re
 from datetime import datetime
 from typing import Annotated
 
@@ -13,6 +12,7 @@ from oloop_server.db import utcnow
 from oloop_server.encoding import b64url_decode, b64url_encode
 from oloop_server.errors import ApiError
 from oloop_server.models import Device, KeyBundle
+from oloop_server.preconditions import read_precondition
 
 router = APIRouter(prefix="/v1/keys")
 
@@ -29,8 +29,6 @@ WRAPPED_SECRET_KEY_BYTES = 2 + 24 + 32 + 16
 MIN_M = 19 * MIB
 MIN_T = 2
 MAX_COST = 2**32 - 1
-
-_REVISION = re.compile(r'^(?:W/)?"?(\d{1,9})"?$')
 
 
 class BundleIn(BaseModel):
@@ -129,16 +127,10 @@ def get_keys(device: DeviceDep, session: SessionDep, response: Response):
 def put_keys(body: PutKeysIn, request: Request, response: Response,
              device: DeviceDep, session: SessionDep):
     values = parse_bundle(body.bundle)
-    if_none_match = request.headers.get("if-none-match")
-    if_match = request.headers.get("if-match")
+    expected = read_precondition(request)
     now: datetime = utcnow()
 
-    if (if_none_match is None) == (if_match is None):
-        raise _bad("exactly one of If-None-Match: * and If-Match is required")
-
-    if if_none_match is not None:
-        if if_none_match.strip() != "*":
-            raise _bad("If-None-Match must be *")
+    if expected is None:
         session.add(KeyBundle(user_id=device.user_id, rev=1, created_at=now,
                               updated_at=now, **values))
         try:
@@ -149,11 +141,6 @@ def put_keys(body: PutKeysIn, request: Request, response: Response,
             raise ApiError(409, "conflict", "a key bundle exists already") from None
         response.headers["ETag"] = _etag(1)
         return {"keyRev": 1}
-
-    match = _REVISION.match(if_match.strip())
-    if match is None:
-        raise _bad("If-Match must be the keyRev in quotes")
-    expected = int(match.group(1))
 
     row = session.get(KeyBundle, device.user_id)
     if row is None:

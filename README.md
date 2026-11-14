@@ -5,8 +5,9 @@ The server of the optional server backend of [oloop](https://github.com/greebo72
 in the clients. The folder backend of oloop does not need it.
 
 **Status:** the login works (accounts, `POST /v1/auth/login`, `/refresh` and `/logout`, with a limit on
-failed logins) and so does the key bundle (`GET` and `PUT /v1/keys`). Projects, documents, blobs and
-agents are not there yet.
+failed logins), the key bundle (`GET` and `PUT /v1/keys`), projects and documents (`PUT` and `GET
+/v1/documents`, the feed of changes, `/v1/head`, the history of a document, `GET /v1/projects`). Image
+blobs, further members of a project (the agents) and the quota are not there yet.
 
 The contract is in the [spec](https://github.com/greebo72/oloop-spec), included here as the submodule
 `spec/`: [`SERVER.md`](spec/SERVER.md) (encryption, API, blobs), [`AGENTS.md`](spec/AGENTS.md) (the CLI
