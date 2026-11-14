@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "httpx", "ruff"]
+dev = ["pytest", "httpx2>=2.13.1", "ruff"]
 
 [project.scripts]
 oloop-server = "oloop_server.cli:main"
