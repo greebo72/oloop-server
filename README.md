@@ -63,6 +63,32 @@ a certificate that Portainer signed itself. Without `--env-id` the only environm
 several they are listed and nothing is built. Mind that the token has the rights of the user that made
 it: a user of its own with access to one environment is the safer choice.
 
+### Deploy the stack by script
+
+`scripts/portainer_deploy.py` creates the stack in Portainer, or updates it, from your local
+`docker-compose.yml` (not part of the repo, see above). The compose file takes its image from
+`${OLOOP_IMAGE}`; the script uses the newest `oloop-server:*` image of the environment, or the one you
+name with `--image`.
+
+```
+scripts/portainer_deploy.py --env-id 3 --dry-run     # look first, nothing is changed
+scripts/portainer_deploy.py --env-id 3
+```
+
+It checks that the image and the network of the reverse proxy exist on the environment before it
+writes anything, passes the subnet of that network as `OLOOP_TRUSTED_PROXIES` (unless you set it; the
+network is the external network of the compose file, `--network` names it when there are several), and
+waits until the server answers its health check. If the server does not come up, the log of the
+container is shown with the database password hidden.
+
+`POSTGRES_PASSWORD` is made at random when the stack is created (or taken from the environment) and
+lives in the stack in Portainer; it is never printed. A later run keeps it, since the database keeps
+its own. Variables that you added to the stack in Portainer are kept as well.
+
+The data lives in folders on the host: `OLOOP_STORAGE` of the compose file says where, with `blobs/`
+and `pgdata/` below it. A one-time `init` service makes
+`blobs/` writable for the server, which does not run as root.
+
 The first account is made in the running container (Portainer: *Containers*, the server, *Console*):
 
 ```
@@ -110,7 +136,7 @@ Environment variables, prefix `OLOOP_`, or a `.env` file: `DATABASE_URL`, `BLOB_
 `BLOB_GC_INTERVAL_MINUTES`, `LOGIN_WINDOW_MINUTES`, `LOGIN_MAX_FAILURES_PER_USER`, `LOGIN_MAX_FAILURES_PER_ADDRESS`. See
 `src/oloop_server/config.py`.
 
-`TRUSTED_PROXIES` takes addresses or networks (`172.18.0.0/16`), comma separated. The `X-Forwarded-For`
+`TRUSTED_PROXIES` takes addresses or networks (`10.9.0.0/16`), comma separated. The `X-Forwarded-For`
 header is only believed when the request comes from one of them; the address of the client is what the
 limit on failed logins counts.
 
