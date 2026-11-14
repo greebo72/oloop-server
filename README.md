@@ -17,12 +17,21 @@ Docker, behind a reverse proxy that ends TLS. The proxy is not part of this repo
 
 ## Run
 
-```
-cp .env.example .env      # set POSTGRES_PASSWORD
-docker compose up --build
-```
+The image is built from the `Dockerfile`. The compose file that runs it is **not part of this repo**:
+it describes one installation (network, paths), so it stays local (`docker-compose.yml` is ignored).
+What the server needs from it:
 
-The port is bound to `127.0.0.1:8000`; point the reverse proxy there.
+- The server is `oloop-server serve`, plain HTTP on port 8000. No port has to be published when a
+  reverse proxy on the same Docker network reaches it.
+- PostgreSQL, reached through `OLOOP_DATABASE_URL`
+  (`postgresql+psycopg://user:password@host:5432/oloop`).
+- A folder for the encrypted images, mounted at the path of `OLOOP_BLOB_DIR` (`/data/blobs` in the
+  image). The image runs as user 10001, so the folder has to be writable for that user, or the
+  container runs as another one (`user:`).
+- Back up the database and the image folder together.
+- `OLOOP_TRUSTED_PROXIES` names the proxy whose `X-Forwarded-*` headers are trusted.
+
+`.env.example` lists the variables of a local compose setup.
 
 ## Develop
 

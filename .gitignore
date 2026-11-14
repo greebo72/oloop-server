@@ -9,3 +9,8 @@ build/
 .DS_Store
 .env
 /data/
+/storage/
+
+# Local deployment: not part of the repo
+docker-compose.yml
+docker-compose.override.yml

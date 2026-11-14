@@ -2,6 +2,7 @@
 .venv
 .env
 data
+storage
 spec
 tests
 **/__pycache__
