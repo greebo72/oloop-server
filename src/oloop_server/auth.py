@@ -45,6 +45,8 @@ class TokensOut(BaseModel):
     accessToken: str
     expiresIn: int
     refreshToken: str
+    # The id of the user: a client needs it for its key bundle (spec/SERVER.md, "Authentication").
+    userId: str
 
 
 def _settings(request: Request) -> Settings:
@@ -101,7 +103,7 @@ def _issue(session: Session, device: Device, now: datetime, settings: Settings) 
     session.add(Token(device_id=device.id, kind="refresh", token_hash=refresh_hash,
                       created_at=now, expires_at=now + timedelta(days=settings.refresh_token_days)))
     return TokensOut(accessToken=access, expiresIn=int(access_life.total_seconds()),
-                     refreshToken=refresh)
+                     refreshToken=refresh, userId=str(device.user_id))
 
 
 def _sign_out(session: Session, device: Device, now: datetime):

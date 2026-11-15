@@ -1,10 +1,11 @@
+import uuid
 from datetime import timedelta
 
 from sqlalchemy import select
 
 from conftest import PASSWORD, bearer, login
 from oloop_server.db import utcnow
-from oloop_server.models import Device, LoginFailure, Token
+from oloop_server.models import Device, LoginFailure, Token, User
 
 # ---------------- Login ----------------
 
@@ -64,6 +65,50 @@ def test_every_login_is_a_device_of_its_own(client, make_user, db):
     login(client, device="phone")
 
     assert sorted(d.name for d in db.scalars(select(Device))) == ["laptop", "phone"]
+
+
+def test_login_returns_the_id_of_the_user(client, make_user, db):
+    make_user("alice")
+    make_user("bob")
+
+    alice = login(client, "alice").json()["userId"]
+    bob = login(client, "bob").json()["userId"]
+
+    stored = {u.username: str(u.id) for u in db.scalars(select(User))}
+    assert alice == stored["alice"] and bob == stored["bob"]
+    assert alice != bob
+
+
+def test_the_id_is_a_lowercase_uuid_with_dashes(client, make_user):
+    make_user()
+
+    user_id = login(client).json()["userId"]
+
+    assert user_id == str(uuid.UUID(user_id)) and user_id == user_id.lower()
+    assert len(user_id) == 36
+
+
+def test_the_id_does_not_depend_on_how_the_name_is_written(client, make_user):
+    make_user("Alice")
+
+    assert login(client, "alice").json()["userId"] == login(client, "ALICE").json()["userId"]
+
+
+def test_refresh_returns_the_same_id(client, make_user):
+    make_user()
+    first = login(client).json()
+
+    refreshed = client.post("/v1/auth/refresh", json={"refreshToken": first["refreshToken"]}).json()
+
+    assert refreshed["userId"] == first["userId"]
+
+
+def test_a_failed_login_tells_nothing_about_ids(client, make_user):
+    make_user()
+
+    response = login(client, password="wrong")
+
+    assert response.status_code == 401 and "userId" not in response.text
 
 
 # ---------------- Logout and the access token ----------------
