@@ -12,6 +12,7 @@ def test_the_migrations_build_the_tables_of_the_models(settings):
     tables = set(inspect(make_engine(settings.database_url)).get_table_names())
 
     assert {"users", "devices", "tokens", "login_failures"} <= tables
+    assert {"agents", "agent_tokens", "agent_keys"} <= tables
 
 
 def test_the_migrations_and_the_models_do_not_differ(settings):

@@ -1,5 +1,5 @@
 """The tables. What is stored is described in spec/SERVER.md; the login, the key
-bundle, projects, documents and blobs are here."""
+bundle, projects, documents, blobs and agents are here."""
 import uuid
 from datetime import datetime
 
@@ -216,3 +216,59 @@ class Blob(Base):
     first_referenced_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
     # Since when no current revision refers to it. Null while one does.
     unreferenced_since: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+
+
+class Agent(Base):
+    """An agent of a user (spec/AGENTS.md). Never deleted, only revoked, so that
+    `writtenBy` of its revisions stays meaningful."""
+
+    __tablename__ = "agents"
+    __table_args__ = (Index("ix_agents_owner_id", "owner_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    # Case-folded: the name is unique among the agents of a user that are not revoked.
+    name_key: Mapped[str] = mapped_column(String(100))
+    # The current key pair's public half (32 bytes).
+    public_key: Mapped[bytes] = mapped_column(LargeBinary)
+    # Made by the user's key when the agent was created (nonce and box). The server
+    # cannot open it; clients check it.
+    registration: Mapped[bytes] = mapped_column(LargeBinary)
+    # How long a token is valid, counted from its issue (a renewal gives the same).
+    lifetime_seconds: Mapped[int] = mapped_column(Integer)
+    # No token is renewed to expire later than this.
+    renew_until: Mapped[datetime] = mapped_column(UtcDateTime)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+
+
+class AgentToken(Base):
+    """A bearer token of an agent. Only the SHA-256 of it is kept."""
+
+    __tablename__ = "agent_tokens"
+    __table_args__ = (Index("ix_agent_tokens_agent_id", "agent_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    # Set when a newer token was issued. A replaced token is valid a little longer,
+    # so that a lost answer does not lock the agent out.
+    replaced_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+
+
+class AgentKey(Base):
+    """One link of the key chain of an agent: a key pair it rotated to, with the
+    statement that the old key made for it. Number 1 is the key of the
+    registration and has no row, so the first link is number 2."""
+
+    __tablename__ = "agent_keys"
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id"), primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary)
+    statement: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
