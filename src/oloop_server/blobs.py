@@ -12,15 +12,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from oloop_server import access
-from oloop_server.auth import SessionDep, current_device
+from oloop_server.auth import Principal, SessionDep, current_principal
 from oloop_server.blobstore import blob_path
 from oloop_server.db import utcnow
 from oloop_server.errors import ApiError
-from oloop_server.models import Blob, Device, Document
+from oloop_server.models import Blob, Document
 
 router = APIRouter(prefix="/v1/blobs")
 
-DeviceDep = Annotated[Device, Depends(current_device)]
+PrincipalDep = Annotated[Principal, Depends(current_principal)]
 
 # The fixed parts of an envelope: header, nonce, tag.
 MIN_BLOB_BYTES = 2 + 24 + 16
@@ -50,12 +50,12 @@ def _header_task(request: Request) -> uuid.UUID:
         raise _bad("X-Oloop-Task must be the id of the task the blob is for") from None
 
 
-def _authorize_upload(session: Session, task_id: uuid.UUID, device: Device) -> uuid.UUID:
+def _authorize_upload(session: Session, task_id: uuid.UUID, principal: Principal) -> uuid.UUID:
     """The project of the task, if the caller may write there."""
     task = session.get(Document, task_id)
     if task is None or task.kind != "task":
         raise access.not_found()
-    access.require_write(session, task.project_id, device.user_id)
+    access.require_write(session, task.project_id, principal.id)
     return task.project_id
 
 
@@ -63,7 +63,7 @@ def _same(row: Blob | None, sha: str, task_id: uuid.UUID) -> bool:
     return row is not None and row.sha256 == sha and row.task_id == task_id
 
 
-def _store(session: Session, device: Device, blob_id: uuid.UUID, task_id: uuid.UUID,
+def _store(session: Session, principal: Principal, blob_id: uuid.UUID, task_id: uuid.UUID,
            project_id: uuid.UUID, sha: str, size: int, tmp, final) -> int:
     """Puts the finished temporary file in its place and records the blob.
 
@@ -86,7 +86,7 @@ def _store(session: Session, device: Device, blob_id: uuid.UUID, task_id: uuid.U
         os.replace(tmp, final)
 
     session.add(Blob(id=blob_id, project_id=project_id, task_id=task_id,
-                     uploaded_by=device.user_id, size=size, sha256=sha, created_at=utcnow(),
+                     uploaded_by=principal.id, size=size, sha256=sha, created_at=utcnow(),
                      unreferenced_since=utcnow()))
     try:
         session.commit()
@@ -101,7 +101,7 @@ def _store(session: Session, device: Device, blob_id: uuid.UUID, task_id: uuid.U
 
 
 @router.put("/{blob_id}")
-async def put_blob(blob_id: uuid.UUID, request: Request, device: DeviceDep, session: SessionDep):
+async def put_blob(blob_id: uuid.UUID, request: Request, principal: PrincipalDep, session: SessionDep):
     settings = request.app.state.settings
     limit = settings.max_blob_bytes
     sha = _header_sha(request)
@@ -111,7 +111,7 @@ async def put_blob(blob_id: uuid.UUID, request: Request, device: DeviceDep, sess
     if declared.isdigit() and int(declared) > limit:
         raise _too_large(limit)
 
-    project_id = await run_in_threadpool(_authorize_upload, session, task_id, device)
+    project_id = await run_in_threadpool(_authorize_upload, session, task_id, principal)
 
     final = blob_path(settings.blob_dir, blob_id)
     final.parent.mkdir(parents=True, exist_ok=True)
@@ -139,7 +139,7 @@ async def put_blob(blob_id: uuid.UUID, request: Request, device: DeviceDep, sess
             raise _bad("X-Content-SHA256 is not the SHA-256 of the body")
 
         status = await run_in_threadpool(
-            _store, session, device, blob_id, task_id, project_id, sha, size, tmp, final)
+            _store, session, principal, blob_id, task_id, project_id, sha, size, tmp, final)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -147,11 +147,11 @@ async def put_blob(blob_id: uuid.UUID, request: Request, device: DeviceDep, sess
 
 
 @router.api_route("/{blob_id}", methods=["GET", "HEAD"])
-def get_blob(blob_id: uuid.UUID, request: Request, device: DeviceDep, session: SessionDep):
+def get_blob(blob_id: uuid.UUID, request: Request, principal: PrincipalDep, session: SessionDep):
     blob = session.get(Blob, blob_id)
     if blob is None:
         raise access.not_found()
-    access.require_read(session, blob.project_id, device.user_id)
+    access.require_read(session, blob.project_id, principal.id)
 
     path = blob_path(request.app.state.settings.blob_dir, blob_id)
     if not path.is_file():

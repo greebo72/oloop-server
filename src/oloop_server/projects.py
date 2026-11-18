@@ -7,25 +7,27 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 
-from oloop_server.auth import SessionDep, current_device
+from oloop_server.auth import Principal, SessionDep, current_principal
 from oloop_server.encoding import b64url_encode
-from oloop_server.models import Device, ProjectKey, ProjectMember
+from oloop_server.models import ProjectKey, ProjectMember
 
 router = APIRouter(prefix="/v1/projects")
 
+PrincipalDep = Annotated[Principal, Depends(current_principal)]
+
 
 @router.get("")
-def list_projects(device: Annotated[Device, Depends(current_device)], session: SessionDep):
+def list_projects(principal: PrincipalDep, session: SessionDep):
     members = session.scalars(
         select(ProjectMember)
-        .where(ProjectMember.principal_id == device.user_id)
+        .where(ProjectMember.principal_id == principal.id)
         .order_by(ProjectMember.created_at, ProjectMember.project_id)
     ).all()
 
     keys: dict = {}
     for key in session.scalars(
         select(ProjectKey)
-        .where(ProjectKey.principal_id == device.user_id)
+        .where(ProjectKey.principal_id == principal.id)
         .order_by(ProjectKey.key_version)
     ):
         keys.setdefault(key.project_id, []).append({

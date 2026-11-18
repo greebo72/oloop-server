@@ -11,14 +11,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from oloop_server import access
-from oloop_server.auth import SessionDep, current_device
+from oloop_server.auth import Principal, SessionDep, current_principal
 from oloop_server.db import utcnow
 from oloop_server.encoding import b64url_decode, b64url_encode
 from oloop_server.errors import ApiError
 from oloop_server.models import (
     Blob,
     Counter,
-    Device,
     Document,
     Project,
     ProjectKey,
@@ -29,7 +28,7 @@ from oloop_server.preconditions import read_precondition
 
 router = APIRouter(prefix="/v1")
 
-DeviceDep = Annotated[Device, Depends(current_device)]
+PrincipalDep = Annotated[Principal, Depends(current_principal)]
 
 # A project key handed over with crypto_box_easy: 24 byte nonce, the message
 # (32 byte key, 16 byte project id, 4 byte key version) and the 16 byte tag.
@@ -152,17 +151,17 @@ def _newest_key_version(session: Session, project_id: uuid.UUID) -> int:
 # ---------------- Reading ----------------
 
 @router.get("/head")
-def head(device: DeviceDep, session: SessionDep):
+def head(principal: PrincipalDep, session: SessionDep):
     """The number of the latest change the caller can see. Cheap to ask."""
     newest = session.scalar(
-        select(func.max(Document.seq)).where(Document.project_id.in_(access.projects_of(device.user_id)))
+        select(func.max(Document.seq)).where(Document.project_id.in_(access.projects_of(principal.id)))
     )
     return {"cursor": str(newest or 0)}
 
 
 @router.get("/documents")
 def feed(
-    device: DeviceDep,
+    principal: PrincipalDep,
     session: SessionDep,
     cursor: str = "",
     limit: Annotated[int, Query(ge=1, le=FEED_MAX_LIMIT)] = FEED_DEFAULT_LIMIT,
@@ -178,7 +177,7 @@ def feed(
 
     rows = session.execute(
         _current()
-        .where(Document.seq > after, Document.project_id.in_(access.projects_of(device.user_id)))
+        .where(Document.seq > after, Document.project_id.in_(access.projects_of(principal.id)))
         .order_by(Document.seq)
         .limit(limit + 1)
     ).all()
@@ -198,23 +197,23 @@ def feed(
     }
 
 
-def _load(session: Session, doc_id: uuid.UUID, device: Device) -> tuple[Document, Revision]:
+def _load(session: Session, doc_id: uuid.UUID, principal: Principal) -> tuple[Document, Revision]:
     row = session.execute(_current().where(Document.id == doc_id)).first()
     if row is None:
         raise access.not_found()
-    access.require_read(session, row[0].project_id, device.user_id)
+    access.require_read(session, row[0].project_id, principal.id)
     return row
 
 
 @router.get("/documents/{doc_id}")
-def get_document(doc_id: uuid.UUID, device: DeviceDep, session: SessionDep):
-    doc, rev = _load(session, doc_id, device)
+def get_document(doc_id: uuid.UUID, principal: PrincipalDep, session: SessionDep):
+    doc, rev = _load(session, doc_id, principal)
     return document_json(doc, rev)
 
 
 @router.get("/documents/{doc_id}/revisions")
-def list_revisions(doc_id: uuid.UUID, device: DeviceDep, session: SessionDep):
-    doc, _ = _load(session, doc_id, device)
+def list_revisions(doc_id: uuid.UUID, principal: PrincipalDep, session: SessionDep):
+    doc, _ = _load(session, doc_id, principal)
     revisions = session.scalars(
         select(Revision).where(Revision.document_id == doc.id).order_by(Revision.rev)
     )
@@ -226,8 +225,8 @@ def list_revisions(doc_id: uuid.UUID, device: DeviceDep, session: SessionDep):
 
 
 @router.get("/documents/{doc_id}/revisions/{rev}")
-def get_revision(doc_id: uuid.UUID, rev: int, device: DeviceDep, session: SessionDep):
-    doc, _ = _load(session, doc_id, device)
+def get_revision(doc_id: uuid.UUID, rev: int, principal: PrincipalDep, session: SessionDep):
+    doc, _ = _load(session, doc_id, principal)
     revision = session.get(Revision, (doc.id, rev))
     if revision is None:
         raise access.not_found()
@@ -238,26 +237,26 @@ def get_revision(doc_id: uuid.UUID, rev: int, device: DeviceDep, session: Sessio
 
 @router.put("/documents/{doc_id}")
 def put_document(doc_id: uuid.UUID, body: PutDocumentIn, request: Request,
-                 device: DeviceDep, session: SessionDep):
+                 principal: PrincipalDep, session: SessionDep):
     settings = request.app.state.settings
     base_rev = read_precondition(request)
     data = _decode_envelope(body.data, settings.max_document_bytes)
     now = utcnow()
 
     if base_rev is None:
-        return _create(session, device, doc_id, body, data, now)
-    return _update(session, device, doc_id, body, data, base_rev, now)
+        return _create(session, principal, doc_id, body, data, now)
+    return _update(session, principal, doc_id, body, data, base_rev, now)
 
 
-def _revision(doc_id, body: PutDocumentIn, data: bytes, device: Device, now) -> Revision:
+def _revision(doc_id, body: PutDocumentIn, data: bytes, principal: Principal, now) -> Revision:
     return Revision(
         document_id=doc_id, rev=body.rev, key_version=body.keyVersion,
-        blob_ref=body.blobRef, size=len(data), written_by=device.user_id,
+        blob_ref=body.blobRef, size=len(data), written_by=principal.id,
         written_at=now, data=data,
     )
 
 
-def _create(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocumentIn,
+def _create(session: Session, principal: Principal, doc_id: uuid.UUID, body: PutDocumentIn,
             data: bytes, now: datetime) -> dict:
     if body.rev != 1:
         raise _bad("a new document has rev 1")
@@ -265,9 +264,9 @@ def _create(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocume
         raise ApiError(409, "conflict", "a document with this id exists already")
 
     if body.kind == "project":
-        project_id = _new_project(session, device, doc_id, body, now)
+        project_id = _new_project(session, principal, doc_id, body, now)
     else:
-        project_id = _task_project(session, device, body)
+        project_id = _task_project(session, principal, body)
         if body.key is not None:
             raise _bad("key is only for a new project")
 
@@ -275,7 +274,7 @@ def _create(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocume
     session.add(Document(id=doc_id, kind=body.kind, project_id=project_id, rev=1, seq=seq,
                          created_at=now, updated_at=now))
     session.flush()
-    session.add(_revision(doc_id, body, data, device, now))
+    session.add(_revision(doc_id, body, data, principal, now))
     if body.kind == "task":
         _reference_blob(session, doc_id, project_id, body.blobRef, None, now)
 
@@ -288,8 +287,10 @@ def _create(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocume
     return {"rev": 1, "cursor": str(seq)}
 
 
-def _new_project(session: Session, device: Device, doc_id: uuid.UUID,
+def _new_project(session: Session, principal: Principal, doc_id: uuid.UUID,
                  body: PutDocumentIn, now: datetime) -> uuid.UUID:
+    if principal.kind != "user":
+        raise ApiError(403, "forbidden", "only a user can create a project")
     if body.projectId is not None and body.projectId != doc_id:
         raise _bad("projectId of a project is its own id")
     if body.blobRef is not None:
@@ -306,31 +307,31 @@ def _new_project(session: Session, device: Device, doc_id: uuid.UUID,
     if len(wrapped) != WRAPPED_PROJECT_KEY_BYTES:
         raise _bad(f"key.wrapped must be {WRAPPED_PROJECT_KEY_BYTES} bytes")
 
-    session.add(Project(id=doc_id, owner_id=device.user_id, created_at=now))
+    session.add(Project(id=doc_id, owner_id=principal.id, created_at=now))
     session.flush()
-    session.add(ProjectMember(project_id=doc_id, principal_id=device.user_id, kind="user",
+    session.add(ProjectMember(project_id=doc_id, principal_id=principal.id, kind="user",
                               role=access.OWNER, created_at=now))
     session.flush()
-    session.add(ProjectKey(project_id=doc_id, principal_id=device.user_id, key_version=1,
-                           granted_by=device.user_id, wrapped=wrapped, created_at=now))
+    session.add(ProjectKey(project_id=doc_id, principal_id=principal.id, key_version=1,
+                           granted_by=principal.id, wrapped=wrapped, created_at=now))
     return doc_id
 
 
-def _task_project(session: Session, device: Device, body: PutDocumentIn) -> uuid.UUID:
+def _task_project(session: Session, principal: Principal, body: PutDocumentIn) -> uuid.UUID:
     if body.projectId is None:
         raise _bad("a task needs projectId")
-    access.require_write(session, body.projectId, device.user_id)
+    access.require_write(session, body.projectId, principal.id)
     if body.keyVersion > _newest_key_version(session, body.projectId):
         raise _bad("keyVersion is not one of this project")
     return body.projectId
 
 
-def _update(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocumentIn,
+def _update(session: Session, principal: Principal, doc_id: uuid.UUID, body: PutDocumentIn,
             data: bytes, base_rev: int, now: datetime) -> dict:
     doc = session.get(Document, doc_id)
     if doc is None:
         raise access.not_found()
-    access.require_write(session, doc.project_id, device.user_id)
+    access.require_write(session, doc.project_id, principal.id)
 
     if body.kind != doc.kind:
         raise _bad("the kind of a document cannot change")
@@ -364,7 +365,7 @@ def _update(session: Session, device: Device, doc_id: uuid.UUID, body: PutDocume
         before = session.get(Revision, (doc.id, base_rev))
         _reference_blob(session, doc.id, doc.project_id, body.blobRef,
                         before.blob_ref if before else None, now)
-    session.add(_revision(doc.id, body, data, device, now))
+    session.add(_revision(doc.id, body, data, principal, now))
     try:
         session.commit()
     except StaleDataError:

@@ -1,4 +1,6 @@
 """Login, refresh and logout (spec/SERVER.md, "Authentication" and "API v1")."""
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Annotated
@@ -113,8 +115,33 @@ def _sign_out(session: Session, device: Device, now: datetime):
 
 # ---------------- The signed-in device ----------------
 
-def current_device(request: Request, session: SessionDep) -> Device:
-    """A dependency: the device behind the bearer token, or 401."""
+@dataclass(frozen=True)
+class Principal:
+    """Whoever acts (spec/SERVER.md, "Principals"): a user, through a device, or an agent."""
+
+    # The id that members, keys and `writtenBy` are filed under.
+    id: uuid.UUID
+    kind: str
+    # The user: the principal itself, or the owner of an agent.
+    user_id: uuid.UUID
+    device: Device | None = None
+
+
+def current_principal(request: Request, session: SessionDep) -> Principal:
+    """A dependency: who is behind the bearer token, or 401."""
+    device = _device_of_token(request, session)
+    return Principal(id=device.user_id, kind="user", user_id=device.user_id, device=device)
+
+
+def current_device(principal: Annotated[Principal, Depends(current_principal)]) -> Device:
+    """A dependency for what only a user may do: the device behind the token.
+    An agent gets 403."""
+    if principal.device is None:
+        raise ApiError(403, "forbidden", "this is for users, not for agents")
+    return principal.device
+
+
+def _device_of_token(request: Request, session: Session) -> Device:
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
     value = value.strip()
     if scheme.lower() != "bearer" or not value:
