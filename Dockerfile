@@ -11,7 +11,6 @@ COPY src ./src
 RUN pip install --no-cache-dir ".[postgres]"
 
 USER oloop
-VOLUME /data
 EXPOSE 8000
 
 # Plain HTTP on purpose: a reverse proxy in front ends TLS.
