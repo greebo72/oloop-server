@@ -14,7 +14,7 @@ from oloop_server.agentauth import find_token
 from oloop_server.config import Settings
 from oloop_server.db import session_per_request, utcnow
 from oloop_server.errors import ApiError
-from oloop_server.models import Device, LoginFailure, Token, User
+from oloop_server.models import AgentToken, Device, LoginFailure, Token, User
 from oloop_server.netutil import client_address, parse_networks
 from oloop_server.security import (
     hash_password,
@@ -126,6 +126,8 @@ class Principal:
     # The user: the principal itself, or the owner of an agent.
     user_id: uuid.UUID
     device: Device | None = None
+    # For an agent: the token row that was shown, which may be one that was replaced.
+    agent_token: AgentToken | None = None
 
 
 def current_principal(request: Request, session: SessionDep) -> Principal:
@@ -143,11 +145,11 @@ def current_principal(request: Request, session: SessionDep) -> Principal:
     found = find_token(session, value, now)
     if found is None:
         raise _unauthorized("the token is not valid")
-    agent, _ = found
+    agent, agent_token = found
     if agent.last_used_at is None or now - agent.last_used_at > _TOUCH_AFTER:
         agent.last_used_at = now
         session.commit()
-    return Principal(id=agent.id, kind="agent", user_id=agent.owner_id)
+    return Principal(id=agent.id, kind="agent", user_id=agent.owner_id, agent_token=agent_token)
 
 
 def current_device(principal: Annotated[Principal, Depends(current_principal)]) -> Device:

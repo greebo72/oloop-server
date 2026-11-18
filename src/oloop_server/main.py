@@ -9,7 +9,17 @@ from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import sessionmaker
 
-from oloop_server import __version__, agents, auth, blobs, documents, errors, keys, projects
+from oloop_server import (
+    __version__,
+    agents,
+    agentself,
+    auth,
+    blobs,
+    documents,
+    errors,
+    keys,
+    projects,
+)
 from oloop_server.blobstore import collect_garbage
 from oloop_server.config import Settings, get_settings
 from oloop_server.db import make_engine
@@ -63,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(keys.router)
     app.include_router(agents.router)
+    app.include_router(agentself.router)
     app.include_router(projects.router)
     app.include_router(documents.router)
     app.include_router(blobs.router)

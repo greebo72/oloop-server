@@ -5,6 +5,7 @@ a statement; the clients check the chain of keys.
 """
 import uuid
 from datetime import datetime, timedelta
+from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
@@ -112,9 +113,10 @@ def create_agent(body: CreateAgentIn, device: DeviceDep, session: SessionDep):
     agent = Agent(
         owner_id=device.user_id, name=name, name_key=key, public_key=public_key,
         registration=registration,
-        lifetime_seconds=int((expires_at - now).total_seconds()),
+        # Rounded up, so that a renewal made at once is never earlier than the first token.
+        lifetime_seconds=ceil((expires_at - now).total_seconds()),
         renew_until=renew_until,
-        renew_period_seconds=int((renew_until - now).total_seconds()),
+        renew_period_seconds=ceil((renew_until - now).total_seconds()),
         created_at=now,
     )
     session.add(agent)
