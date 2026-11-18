@@ -23,6 +23,7 @@ def upgrade() -> None:
     sa.Column('registration', sa.LargeBinary(), nullable=False),
     sa.Column('lifetime_seconds', sa.Integer(), nullable=False),
     sa.Column('renew_until', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('renew_period_seconds', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),

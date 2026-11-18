@@ -239,6 +239,8 @@ class Agent(Base):
     lifetime_seconds: Mapped[int] = mapped_column(Integer)
     # No token is renewed to expire later than this.
     renew_until: Mapped[datetime] = mapped_column(UtcDateTime)
+    # How long a renewal period lasts; a new token issued by the user starts a new one.
+    renew_period_seconds: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)

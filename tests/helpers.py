@@ -73,3 +73,17 @@ def add_member(app, project_id, name, role):
         session.add(ProjectKey(project_id=uuid.UUID(project_id), principal_id=uid,
                                key_version=1, granted_by=uid, wrapped=b"\x00" * 92))
         session.commit()
+
+
+def agent_body(name="claude", **changes):
+    """The form of a registration; the server cannot tell more."""
+    body = {"name": name, "publicKey": b64(bytes([7]) * 32), "registration": b64(bytes([8]) * 88)}
+    body.update(changes)
+    return body
+
+
+def make_agent(client, headers, name="claude", **changes):
+    """Creates an agent and returns the answer: agentId, token and expiresAt."""
+    response = client.post("/v1/agents", json=agent_body(name, **changes), headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()
