@@ -1,6 +1,6 @@
 # Plan: agents in oloop-server
 
-Status: started 2026-11-18. The contract is `spec/AGENTS.md` and `spec/SERVER.md`; this file says in which order the server grows to meet it, and records the choices made on the way.
+Status: steps 1 to 7 are done (2026-11-18), see "What was done" at the end. The contract is `spec/AGENTS.md` and `spec/SERVER.md`; this file says in which order the server grows to meet it, and records the choices made on the way.
 
 ## Where the server stands
 
@@ -34,3 +34,13 @@ Not part of it: building the image and updating the stack (done only when asked)
 - Step 1 touches every endpoint. It adds nothing, so a failing test points at the refactoring.
 - A mistake in the cryptography of registration, statement or key chain would only show with a real client. The vectors in `spec/fixtures/server/` are the check; the CLI is the first user of them.
 - A lost credentials file loses the key pair of the agent. The spec does not solve this: the user makes a new agent.
+
+## What was done
+
+All seven steps are in, each as its own commit, 396 tests (SQLite). Where it went beyond or differently from the plan:
+
+- **Feed:** as decided, by giving the documents of the project new numbers of change when a member joins (`restamp_project`). Changing a role does not.
+- **Renewal retry:** a token shown again within its 10 minutes of grace gets a token of the same expiry, also at the end of the renewal period; otherwise a lost answer at the limit would lock the agent out. A test found that a lifetime cut to whole seconds made an immediate renewal shorter than the first token (`403`); lifetimes are now rounded up.
+- **New token from the user** ends the old tokens at once (no grace) and starts a new renewal period of the same length; `renew_period_seconds` is stored for that.
+- **Housekeeping** has its own setting (`OLOOP_TOKEN_PURGE_INTERVAL_MINUTES`) and a command (`purge-tokens`). The newest token of an agent is never removed, because the list shows when it expired.
+- **Not done:** running the tests on PostgreSQL (no database to run them on here; the migration uses only types that both databases take), raising the pointer of the `spec` submodule (the spec commit with the new rules is not pushed yet, a pointer to it would not check out), building the image and updating the stack.
