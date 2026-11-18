@@ -2,8 +2,21 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from helpers import agent_body, b64, make_agent
-from oloop_server.models import Agent, AgentToken
+from conftest import bearer
+from helpers import (
+    add_agent_member,
+    agent_body,
+    b64,
+    make_agent,
+    make_project,
+    make_task,
+    new_id,
+    project_body,
+    task_body,
+    user_id,
+    write,
+)
+from oloop_server.models import Agent, AgentToken, ProjectKey, ProjectMember
 
 
 def stamp(moment):
@@ -157,3 +170,106 @@ def test_a_new_token_ends_the_old_one_and_starts_a_new_renewal_period(client, al
     db.expire_all()
     renew_until = db.scalar(select(Agent)).renew_until
     assert (renew_until - datetime.now(UTC)).days >= 39
+
+
+# ---------------- Signing in as an agent ----------------
+
+def test_an_agent_token_works_as_a_bearer_token_and_marks_the_use(client, alice):
+    made = make_agent(client, alice)
+    agent = bearer(made["token"])
+
+    assert client.get("/v1/head", headers=agent).status_code == 200
+    assert client.get("/v1/projects", headers=agent).json() == []
+    assert client.get("/v1/documents", headers=agent).json()["items"] == []
+    assert client.get("/v1/agents", headers=alice).json()[0]["lastUsedAt"] is not None
+
+
+def test_a_wrong_expired_or_revoked_token_is_refused(client, alice, db):
+    made = make_agent(client, alice)
+    assert client.get("/v1/head", headers=bearer("oloop_ag_nope")).status_code == 401
+
+    row = db.scalar(select(AgentToken))
+    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db.commit()
+    assert client.get("/v1/head", headers=bearer(made["token"])).status_code == 401
+
+    other = make_agent(client, alice, "other")
+    assert client.get("/v1/head", headers=bearer(other["token"])).status_code == 200
+    client.post(f"/v1/agents/{other['agentId']}/revoke", headers=alice)
+    assert client.get("/v1/head", headers=bearer(other["token"])).status_code == 401
+
+
+def test_a_new_token_given_by_the_user_ends_the_old_one_at_once(client, alice):
+    made = make_agent(client, alice)
+    new = client.post(f"/v1/agents/{made['agentId']}/token", headers=alice).json()
+
+    assert client.get("/v1/head", headers=bearer(made["token"])).status_code == 401
+    assert client.get("/v1/head", headers=bearer(new["token"])).status_code == 200
+
+
+def test_an_agent_cannot_do_what_is_for_users(client, alice):
+    agent = bearer(make_agent(client, alice)["token"])
+    some_id = new_id()
+
+    assert write(client, agent, some_id, project_body()).status_code == 403
+    assert client.get("/v1/keys", headers=agent).status_code == 403
+    assert client.put("/v1/keys", headers=agent, json={}).status_code == 403
+    assert client.post("/v1/auth/logout", headers=agent).status_code == 403
+    assert client.get("/v1/agents", headers=agent).status_code == 403
+    assert client.post("/v1/agents", headers=agent, json=agent_body("x")).status_code == 403
+    assert client.post(f"/v1/agents/{some_id}/revoke", headers=agent).status_code == 403
+    assert client.post(f"/v1/agents/{some_id}/token", headers=agent).status_code == 403
+    # Nothing was made on the way.
+    assert client.get("/v1/projects", headers=alice).json() == []
+
+
+def test_an_agent_sees_nothing_of_a_project_it_was_not_given(client, app, alice):
+    project_id = make_project(client, alice)
+    task_id = make_task(client, alice, project_id)
+    agent = bearer(make_agent(client, alice)["token"])
+
+    assert client.get("/v1/projects", headers=agent).json() == []
+    assert client.get("/v1/documents", headers=agent).json()["items"] == []
+    assert client.get(f"/v1/documents/{task_id}", headers=agent).status_code == 404
+    assert write(client, agent, new_id(), task_body(project_id)).status_code == 404
+    assert write(client, agent, task_id, task_body(project_id, rev=2), base=1).status_code == 404
+
+
+def test_an_agent_with_write_reads_and_writes_tasks_and_is_named_as_the_writer(client, app, alice):
+    project_id = make_project(client, alice)
+    made = make_agent(client, alice)
+    agent = bearer(made["token"])
+    add_agent_member(app, project_id, made["agentId"], "write")
+
+    assert [p["id"] for p in client.get("/v1/projects", headers=agent).json()] == [project_id]
+    task_id = new_id()
+    assert write(client, agent, task_id, task_body(project_id)).status_code == 200
+    assert write(client, agent, task_id, task_body(project_id, rev=2, fill=2), base=1).status_code == 200
+
+    document = client.get(f"/v1/documents/{task_id}", headers=alice).json()
+    assert document["writtenBy"] == made["agentId"]
+    assert document["writtenBy"] != str(user_id(app, "alice"))
+
+
+def test_an_agent_with_read_only_reads(client, app, alice):
+    project_id = make_project(client, alice)
+    task_id = make_task(client, alice, project_id)
+    made = make_agent(client, alice)
+    agent = bearer(made["token"])
+    add_agent_member(app, project_id, made["agentId"], "read")
+
+    assert client.get(f"/v1/documents/{task_id}", headers=agent).status_code == 200
+    assert write(client, agent, new_id(), task_body(project_id)).status_code == 403
+    assert write(client, agent, task_id, task_body(project_id, rev=2), base=1).status_code == 403
+
+
+def test_revoking_an_agent_removes_its_memberships_and_keys(client, app, alice, db):
+    project_id = make_project(client, alice)
+    made = make_agent(client, alice)
+    add_agent_member(app, project_id, made["agentId"], "write")
+
+    client.post(f"/v1/agents/{made['agentId']}/revoke", headers=alice)
+
+    assert db.scalars(select(ProjectMember.principal_id)).all() == [user_id(app, "alice")]
+    assert db.scalars(select(ProjectKey.principal_id)).all() == [user_id(app, "alice")]
+    assert client.get("/v1/head", headers=bearer(made["token"])).status_code == 401

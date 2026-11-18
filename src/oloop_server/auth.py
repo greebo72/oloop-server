@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from oloop_server.agentauth import find_token
 from oloop_server.config import Settings
 from oloop_server.db import session_per_request, utcnow
 from oloop_server.errors import ApiError
@@ -129,8 +130,24 @@ class Principal:
 
 def current_principal(request: Request, session: SessionDep) -> Principal:
     """A dependency: who is behind the bearer token, or 401."""
-    device = _device_of_token(request, session)
-    return Principal(id=device.user_id, kind="user", user_id=device.user_id, device=device)
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    value = value.strip()
+    if scheme.lower() != "bearer" or not value:
+        raise _unauthorized("a bearer token is required")
+
+    now = utcnow()
+    device = _device_of_token(session, value, now)
+    if device is not None:
+        return Principal(id=device.user_id, kind="user", user_id=device.user_id, device=device)
+
+    found = find_token(session, value, now)
+    if found is None:
+        raise _unauthorized("the token is not valid")
+    agent, _ = found
+    if agent.last_used_at is None or now - agent.last_used_at > _TOUCH_AFTER:
+        agent.last_used_at = now
+        session.commit()
+    return Principal(id=agent.id, kind="agent", user_id=agent.owner_id)
 
 
 def current_device(principal: Annotated[Principal, Depends(current_principal)]) -> Device:
@@ -141,18 +158,13 @@ def current_device(principal: Annotated[Principal, Depends(current_principal)]) 
     return principal.device
 
 
-def _device_of_token(request: Request, session: Session) -> Device:
-    scheme, _, value = request.headers.get("authorization", "").partition(" ")
-    value = value.strip()
-    if scheme.lower() != "bearer" or not value:
-        raise _unauthorized("a bearer token is required")
-
-    now = utcnow()
+def _device_of_token(session: Session, value: str, now: datetime) -> Device | None:
+    """The device of a valid access token, or None."""
     token = session.scalar(
         select(Token).where(Token.token_hash == hash_token(value), Token.kind == "access")
     )
     if token is None or token.expires_at <= now or token.device.revoked_at is not None:
-        raise _unauthorized("the token is not valid")
+        return None
 
     device = token.device
     if device.last_used_at is None or now - device.last_used_at > _TOUCH_AFTER:

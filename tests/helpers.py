@@ -87,3 +87,15 @@ def make_agent(client, headers, name="claude", **changes):
     response = client.post("/v1/agents", json=agent_body(name, **changes), headers=headers)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def add_agent_member(app, project_id, agent_id, role):
+    """The rows of a member that is an agent; the API for it comes after."""
+    with Session(app.state.engine) as session:
+        agent = uuid.UUID(agent_id)
+        session.add(ProjectMember(project_id=uuid.UUID(project_id), principal_id=agent,
+                                  kind="agent", role=role))
+        session.flush()
+        session.add(ProjectKey(project_id=uuid.UUID(project_id), principal_id=agent,
+                               key_version=1, granted_by=agent, wrapped=b"\x00" * 92))
+        session.commit()
