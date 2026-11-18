@@ -108,6 +108,15 @@ echo "$PASSWORD" | oloop-server create-user alice --password-stdin
 `oloop-server serve` brings the database up to date before it starts (`--no-migrate` skips that);
 `oloop-server migrate` does only that.
 
+### Agents
+
+An agent is made by a user in their own client, because that needs the user's secret key
+(`spec/AGENTS.md`). The server holds its public key, its tokens (as hashes) and the keys of the
+projects it was given, which it cannot open. A token is valid for 90 days unless the user asks
+otherwise, can be renewed by the agent until the end of its renewal period (one year), and a user can
+end it at once. Tokens that can never be used again are removed every
+`OLOOP_TOKEN_PURGE_INTERVAL_MINUTES` (60; 0 switches it off); `oloop-server purge-tokens` does it once.
+
 ## Blobs
 
 The encrypted images are files below `OLOOP_BLOB_DIR`, in folders named after the first characters of
@@ -133,7 +142,7 @@ oloop-server serve
 
 Environment variables, prefix `OLOOP_`, or a `.env` file: `DATABASE_URL`, `BLOB_DIR`, `TRUSTED_PROXIES`,
 `MAX_DOCUMENT_BYTES`, `MAX_BLOB_BYTES`, `ACCESS_TOKEN_MINUTES`, `REFRESH_TOKEN_DAYS`,
-`BLOB_GC_INTERVAL_MINUTES`, `LOGIN_WINDOW_MINUTES`, `LOGIN_MAX_FAILURES_PER_USER`, `LOGIN_MAX_FAILURES_PER_ADDRESS`. See
+`BLOB_GC_INTERVAL_MINUTES`, `TOKEN_PURGE_INTERVAL_MINUTES`, `LOGIN_WINDOW_MINUTES`, `LOGIN_MAX_FAILURES_PER_USER`, `LOGIN_MAX_FAILURES_PER_ADDRESS`. See
 `src/oloop_server/config.py`.
 
 `TRUSTED_PROXIES` takes addresses or networks (`10.9.0.0/16`), comma separated. The `X-Forwarded-For`
