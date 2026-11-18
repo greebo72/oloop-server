@@ -45,3 +45,8 @@ def require_write(session: Session, project_id: uuid.UUID, principal_id: uuid.UU
     if role not in WRITERS:
         raise ApiError(403, "forbidden", "this project is read-only for you")
     return role
+
+
+def require_owner(session: Session, project_id: uuid.UUID, principal_id: uuid.UUID) -> None:
+    if require_read(session, project_id, principal_id) != OWNER:
+        raise ApiError(403, "forbidden", "only the owner of the project may do this")

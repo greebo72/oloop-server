@@ -118,6 +118,17 @@ def _next_seq(session: Session) -> int:
     ).scalar_one()
 
 
+def restamp_project(session: Session, project_id: uuid.UUID) -> None:
+    """Gives every document of the project a new number of change, without a new
+    revision. The feed then shows them again to everyone in the project, which is
+    how a member that joins gets what was written before (spec/SERVER.md,
+    "Documents"). A client that has the revision already takes it in its stride."""
+    for doc_id in session.scalars(
+        select(Document.id).where(Document.project_id == project_id).order_by(Document.seq)
+    ).all():
+        session.execute(update(Document).where(Document.id == doc_id).values(seq=_next_seq(session)))
+
+
 def _reference_blob(session: Session, task_id: uuid.UUID, project_id: uuid.UUID,
                     new: uuid.UUID | None, old: uuid.UUID | None, now: datetime) -> None:
     """Keeps the books of which blob a task refers to, for the clean-up.
