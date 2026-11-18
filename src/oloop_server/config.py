@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # 0 switches it off; `oloop-server gc-blobs` does it once.
     blob_gc_interval_minutes: float = 60
 
+    # How often tokens that can never be used again are removed, in minutes.
+    # 0 switches it off; `oloop-server purge-tokens` does it once.
+    token_purge_interval_minutes: float = 60
+
     # Tokens (spec/SERVER.md, "Authentication"). The spec fixes 15 minutes for
     # the access token; the life of a refresh token is renewed at every use.
     access_token_minutes: int = 15

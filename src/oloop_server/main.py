@@ -23,31 +23,40 @@ from oloop_server import (
 from oloop_server.blobstore import collect_garbage
 from oloop_server.config import Settings, get_settings
 from oloop_server.db import make_engine
+from oloop_server.housekeeping import purge_expired_tokens
 from oloop_server.netutil import parse_networks
 
 log = logging.getLogger("oloop_server")
 
 
-async def _clean_up_regularly(app: FastAPI, every_seconds: float) -> None:
+async def _run_regularly(every_seconds: float, what: str, job) -> None:
     while True:
         await asyncio.sleep(every_seconds)
         try:
-            await run_in_threadpool(
-                collect_garbage, app.state.session_factory, app.state.settings.blob_dir)
+            await run_in_threadpool(job)
         except Exception:
             # The next round tries again; the reason is in the log.
-            log.exception("the clean-up of the blobs failed")
+            log.exception("the clean-up of %s failed", what)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    minutes = app.state.settings.blob_gc_interval_minutes
-    task = asyncio.create_task(_clean_up_regularly(app, minutes * 60)) if minutes > 0 else None
+    settings = app.state.settings
+    jobs = []
+    if settings.blob_gc_interval_minutes > 0:
+        jobs.append((settings.blob_gc_interval_minutes, "the blobs", lambda: collect_garbage(
+            app.state.session_factory, settings.blob_dir)))
+    if settings.token_purge_interval_minutes > 0:
+        jobs.append((settings.token_purge_interval_minutes, "the tokens",
+                     lambda: purge_expired_tokens(app.state.session_factory)))
+    tasks = [asyncio.create_task(_run_regularly(minutes * 60, what, job))
+             for minutes, what, job in jobs]
     try:
         yield
     finally:
-        if task is not None:
+        for task in tasks:
             task.cancel()
+        for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 

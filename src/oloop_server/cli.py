@@ -12,6 +12,7 @@ from oloop_server.auth import username_key
 from oloop_server.blobstore import collect_garbage
 from oloop_server.config import get_settings
 from oloop_server.db import make_engine
+from oloop_server.housekeeping import purge_expired_tokens
 from oloop_server.migrate import upgrade
 from oloop_server.models import User
 from oloop_server.security import hash_password
@@ -67,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
 
     commands.add_parser("migrate", help="update the database to the current version")
     commands.add_parser("gc-blobs", help="remove the blobs nobody needs, once")
+    commands.add_parser("purge-tokens", help="remove the tokens that can never be used again, once")
 
     user = commands.add_parser("create-user", help="create an account")
     user.add_argument("username")
@@ -86,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
             sessionmaker(make_engine(settings.database_url)), settings.blob_dir)
         print(f"removed {result.never_referenced} blobs never used, {result.dropped} dropped "
               f"ones and {result.stray_files} stray files")
+        return 0
+
+    if args.command == "purge-tokens":
+        settings = get_settings()
+        upgrade(settings.database_url)
+        purged = purge_expired_tokens(sessionmaker(make_engine(settings.database_url)))
+        print(f"removed {purged.user_tokens} tokens of users and {purged.agent_tokens} tokens of agents")
         return 0
 
     if args.command == "create-user":
