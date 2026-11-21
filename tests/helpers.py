@@ -77,7 +77,7 @@ def add_member(app, project_id, name, role):
 
 def agent_body(name="claude", **changes):
     """The form of a registration; the server cannot tell more."""
-    body = {"name": name, "publicKey": b64(bytes([7]) * 32), "registration": b64(bytes([8]) * 88)}
+    body = {"id": new_id(), "name": name, "publicKey": b64(bytes([7]) * 32), "registration": b64(bytes([8]) * 88)}
     body.update(changes)
     return body
 

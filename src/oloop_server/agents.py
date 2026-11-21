@@ -9,8 +9,9 @@ from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import UUID4, BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from oloop_server.agentauth import issue_token, newest_token, replace_tokens
@@ -38,6 +39,8 @@ MAX_YEARS = 10
 class CreateAgentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Chosen by the client: the registration contains it and is made before the request.
+    id: UUID4
     name: str = Field(min_length=1, max_length=100)
     publicKey: str
     registration: str
@@ -110,8 +113,12 @@ def create_agent(body: CreateAgentIn, device: DeviceDep, session: SessionDep):
     if taken is not None:
         raise ApiError(409, "conflict", "an agent of this name exists already")
 
+    # Whoever owns it: the same answer, so that an id tells nothing about other users.
+    if session.get(Agent, body.id) is not None:
+        raise ApiError(409, "conflict", "an agent with this id exists already")
+
     agent = Agent(
-        owner_id=device.user_id, name=name, name_key=key, public_key=public_key,
+        id=body.id, owner_id=device.user_id, name=name, name_key=key, public_key=public_key,
         registration=registration,
         # Rounded up, so that a renewal made at once is never earlier than the first token.
         lifetime_seconds=ceil((expires_at - now).total_seconds()),
@@ -120,7 +127,11 @@ def create_agent(body: CreateAgentIn, device: DeviceDep, session: SessionDep):
         created_at=now,
     )
     session.add(agent)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        raise ApiError(409, "conflict", "an agent with this id exists already") from None
     token = issue_token(session, agent, now, expires_at)
     session.commit()
     return {"agentId": str(agent.id), "token": token, "expiresAt": iso(expires_at)}

@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -92,6 +93,47 @@ def test_the_keys_must_have_the_right_size_and_form(client, alice):
     ):
         response = client.post("/v1/agents", headers=alice, json=agent_body(**changes))
         assert response.status_code == 400, changes
+
+
+def test_the_agent_gets_the_id_the_client_chose(client, alice):
+    chosen = new_id()
+    made = make_agent(client, alice, id=chosen)
+    assert made["agentId"] == chosen
+    assert [row["id"] for row in client.get("/v1/agents", headers=alice).json()] == [chosen]
+
+
+def test_an_id_in_capitals_is_stored_and_answered_in_lower_case(client, alice):
+    chosen = new_id()
+    made = make_agent(client, alice, id=chosen.upper())
+    assert made["agentId"] == chosen
+
+
+def test_the_id_is_required_and_must_be_a_version_4_uuid(client, alice):
+    body = agent_body()
+    del body["id"]
+    assert client.post("/v1/agents", headers=alice, json=body).status_code == 400
+    for bad in ("not-a-uuid", "", 5, None, str(uuid.uuid1()), str(uuid.uuid5(uuid.NAMESPACE_DNS, "x"))):
+        response = client.post("/v1/agents", headers=alice, json=agent_body(id=bad))
+        assert response.status_code == 400, bad
+
+
+def test_an_id_that_exists_is_a_conflict_whoever_owns_it(client, alice, bob):
+    chosen = new_id()
+    make_agent(client, alice, "first", id=chosen)
+
+    for headers, name in ((alice, "other"), (bob, "first")):
+        response = client.post("/v1/agents", headers=headers, json=agent_body(name, id=chosen))
+        assert response.status_code == 409
+    # Nothing was written by the refused requests: the owner still has one agent, bob none.
+    assert len(client.get("/v1/agents", headers=alice).json()) == 1
+    assert client.get("/v1/agents", headers=bob).json() == []
+
+
+def test_an_id_stays_taken_after_a_revoke(client, alice):
+    chosen = new_id()
+    made = make_agent(client, alice, id=chosen)
+    assert client.post(f"/v1/agents/{made['agentId']}/revoke", headers=alice).status_code == 204
+    assert client.post("/v1/agents", headers=alice, json=agent_body("again", id=chosen)).status_code == 409
 
 
 def test_a_name_is_taken_once_without_regard_to_case_but_free_again_after_a_revoke(client, alice):
